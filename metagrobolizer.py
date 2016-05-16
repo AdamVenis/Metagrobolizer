@@ -1,5 +1,14 @@
+## TODOS:
+#   alpha beta pruning
+#   hashing board states for evaluation
+#   modify board instance instead of create new instance (test this)
+#   use timer module to evaluate for a certain time period
+##
+
+import cmd
 import copy
 import random
+import sys
 import time
 
 WHITE = 0
@@ -14,11 +23,7 @@ class HumanAgent():
         moves = self.game.moves()
         while True:
             input = raw_input('hey buddy ').upper()
-            x_old = ord(input[0]) - 65
-            y_old = int(input[1]) - 1
-            x_new = ord(input[2]) - 65
-            y_new = int(input[3]) - 1
-            rtn = Move(self.game, self.game.board[x_old][y_old], x_new, y_new)
+            rtn = Move.from_string(input, self.game)
             if rtn in moves:
                 return rtn
             print('BAD INPUT, TRY AGAIN')
@@ -39,7 +44,7 @@ class MinMaxAgent():
 
     def move(self):
         rtn, val = self.minmax(self.game, parity=1, depth=self.depth)
-        print(str(rtn), val)
+        #print('%s, %.2f' % (str(rtn), val))
         return rtn
 
     def minmax(self, game, parity, depth):
@@ -49,7 +54,7 @@ class MinMaxAgent():
             val = -10**6 if parity else 10**6
             for move in game.moves():
                 new_game = simulate(move)
-                temp_val = static_eval(new_game) * (-1)**self.colour
+                temp_val = self.static_eval(new_game) * (-1)**self.colour
                 rtn, val = m((rtn, val), (move, temp_val), key=lambda x: x[1])
             return rtn, val
         else:
@@ -57,12 +62,35 @@ class MinMaxAgent():
                           for move in game.moves()), key=lambda x: x[1][1])
             return rtn, val[1]
 
+    def static_eval(self, game):
+        return self.eval_player(game, WHITE) - self.eval_player(game, BLACK)
+
+    def eval_player(self, game, colour):
+        rtn = 0
+        for piece in game.pieces:
+            if piece.colour == colour:
+                if isinstance(piece, Pawn):
+                    rtn += 1
+                elif isinstance(piece, Knight):
+                    rtn += 3
+                elif isinstance(piece, Bishop):
+                    rtn += 3
+                elif isinstance(piece, Rook):
+                    rtn += 5
+                elif isinstance(piece, Queen):
+                    rtn += 9
+                elif isinstance(piece, King):
+                    rtn += 1000
+                rtn += 0.25 * len(piece.moves(game))
+        return rtn
+
 class Game():
     def __init__(self):
         self.board = [[FREE] * 8 for _ in range(8)]
         self.pieces = []
         self.turn = 0
         self.winner = -1
+        self.en_passant = None # square that can currently be en passant'd into
 
         for i in range(8):
             self.add(Pawn(WHITE, i, 1))
@@ -71,8 +99,8 @@ class Game():
         self.add(Rook(WHITE, 0, 0))
         self.add(Knight(WHITE, 1, 0))
         self.add(Bishop(WHITE, 2, 0))
-        self.add(King(WHITE, 3, 0))
-        self.add(Queen(WHITE, 4, 0))
+        self.add(Queen(WHITE, 3, 0))
+        self.add(King(WHITE, 4, 0))
         self.add(Bishop(WHITE, 5, 0))
         self.add(Knight(WHITE, 6, 0))
         self.add(Rook(WHITE, 7, 0))
@@ -80,8 +108,8 @@ class Game():
         self.add(Rook(BLACK, 0, 7))
         self.add(Knight(BLACK, 1, 7))
         self.add(Bishop(BLACK, 2, 7))
-        self.add(King(BLACK, 3, 7))
-        self.add(Queen(BLACK, 4, 7))
+        self.add(Queen(BLACK, 3, 7))
+        self.add(King(BLACK, 4, 7))
         self.add(Bishop(BLACK, 5, 7))
         self.add(Knight(BLACK, 6, 7))
         self.add(Rook(BLACK, 7, 7))
@@ -129,11 +157,14 @@ class Pawn(Piece):
             if (self.y + direction*6 in range(len(game.board)) and
                 game.square(self.x, self.y + 2 * direction) == FREE):
                 rtn.append(Move(game, self, self.x, self.y + 2 * direction))
-        if game.square(self.x - 1, self.y + direction) == 1 - self.colour:
-            rtn.append(Move(game, self, self.x - 1, self.y + direction))
-        if game.square(self.x + 1, self.y + direction) == 1 - self.colour:
-            rtn.append(Move(game, self, self.x + 1, self.y + direction))
-        return rtn # still needs en passant and promotions
+            elif self.y % 8 == (-1)**direction: # second last rank
+                pass # some promotion stuff
+        for capture_delta in [-1, 1]:
+            new_square = self.x + capture_delta, self.y + direction
+            if game.square(*new_square) == 1 - self.colour or new_square == game.en_passant:
+                rtn.append(Move(game, self, *new_square))
+
+        return rtn # still needs promotions
 
     def __repr__(self):
         return 'P' if self.colour == WHITE else 'p'
@@ -213,6 +244,13 @@ class Queen(Piece):
 
 
 class King(Piece):
+
+    def __init__(self, colour, posx, posy):
+        self.colour = colour
+        self.x = posx
+        self.y = posy
+        self.can_castle = True
+
     def moves(self, game):
         rtn = []
         deltas = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]
@@ -245,6 +283,24 @@ class Move():
         self.piece.y = self.posy
         self.game.turn += 1
 
+        if isinstance(self.piece, Pawn) and abs(self.posy - self.piece.y) == 2:
+            direction = 1 if self.colour == WHITE else -1
+            self.game.en_passant = (self.piece.x, self.piece.y + direction)
+        else:
+            self.game.en_passant = None
+
+    @staticmethod
+    def from_string(input, game):
+        x_old = ord(input[0]) - 97
+        y_old = int(input[1]) - 1
+        x_new = ord(input[2]) - 97
+        y_new = int(input[3]) - 1
+        return Move(game, game.board[x_old][y_old], x_new, y_new)
+
+    def to_string(self):
+        return '%s%d%s%d' % (chr(self.piece.x + 97), self.piece.y + 1,
+                             chr(self.posx + 97), self.posy + 1)
+
     def __eq__(self, move):
         return (move.piece == self.piece and
                 move.posx == self.posx and
@@ -252,9 +308,6 @@ class Move():
 
     def __str__(self):
         return 'Move: %s to %s%d' % (self.piece.__class__.__name__, chr(self.posx+65), self.posy+1)
-
-def static_eval(game):
-    return material(game, WHITE) - material(game, BLACK)
 
 def material(game, colour):
     rtn = 0
@@ -279,14 +332,12 @@ def simulate(move):
     new_move.execute()
     return new_move.game
 
-if __name__ == '__main__':
+def play():
     game = Game()
-    agent1 = MinMaxAgent(game, BLACK, 3)
+    agent1 = MinMaxAgent(game, WHITE, 3)
     agent2 = MinMaxAgent(game, BLACK, 3)
     start = time.time()
     while True:
-        print(game)
-        print(time.time()-start, static_eval(game))
         if game.winner == 0:
             print('WHITE WINS')
             break
@@ -297,20 +348,43 @@ if __name__ == '__main__':
             agent = agent1
         else:
             agent = agent2
+        print(game)
+        print(time.time()-start, agent.static_eval(game))
         move = agent.move()
         move.execute()
 
-def test(): # OF COURSE!
-    game = Game()
-    Move(game, game.board[0][1], 0, 3).execute() # A4
-    Move(game, game.board[0][6], 0, 4).execute() # A5
-    Move(game, game.board[1][1], 1, 2).execute() # B3
-    Move(game, game.board[1][6], 1, 5).execute() # B6
-    Move(game, game.board[2][1], 2, 3).execute() # C4
-    Move(game, game.board[2][6], 2, 4).execute() # C5
-    Move(game, game.board[3][1], 3, 2).execute() # D3
-    print(game)
-    agent = MinMaxAgent(game, BLACK)
-    move = agent.move()
-    move.execute()
-    print(game)
+class Shell(cmd.Cmd):
+    def __init__(self):
+        cmd.Cmd.__init__(self, 'TAB')
+        self.prompt = ''
+
+    def do_uci(self, args):
+        print('id name Metagrobolizer')
+        print('id auther Adam Venis')
+        print('uciok')
+
+    def do_isready(self, args):
+        print('readyok')
+
+    def do_ucinewgame(self, args):
+        pass
+
+    def do_position(self, args):
+        moves = args.split()[2:]
+        game = Game()
+        human_agent = HumanAgent(game)
+        for move in moves:
+            Move.from_string(move, game).execute()
+        self.game = game
+
+    def do_go(self, args):
+        game = self.game
+        engine_agent = MinMaxAgent(game, BLACK if game.turn % 2 else WHITE, 3)
+        print('bestmove %s' % engine_agent.move().to_string())
+
+    def do_quit(self, args):
+        sys.exit()
+
+if __name__ == '__main__':
+    play() # terminal interface
+    #Shell().cmdloop() # uci interface

@@ -1,2 +1,3 @@
 build_engine.bat
 *.pyc
+replays/*

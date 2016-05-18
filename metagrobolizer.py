@@ -45,43 +45,44 @@ class MinMaxAgent():
         self.depth = depth
 
     def move(self, game):
-        self.cache = {}
-        self.instances = defaultdict(int)
-        rtn, val = self.minmax(game, parity=1, depth=self.depth)
-        print('instances: %s, cache_size: %s' % (self.instances, len(self.cache)))
-        #print('%s, %.2f' % (str(rtn), val))
-        return rtn
+        running_results = [(-10**6 * (-1)**i, None) for i in range(self.depth)]
+        node_stack = [[], [(simulate(move), move) for move in game.moves()]]
+        stack_depth = 0
+        while node_stack:
+            # expand(nodes)
+            while len(node_stack) <= self.depth:
+                node_stack.append([(simulate(move), node_stack[-1][-1][1])
+                    for move in node_stack[-1][-1][0].moves()])
+                node_stack[-2].pop()
 
-    def minmax(self, game, parity, depth):
-        self.instances[depth] += 1
-        if game.to_FEN() in self.cache:
-            return self.cache[game.to_FEN()]
+            # aggregate(bottom_level)
+            m = max if self.depth % 2 == 1 else min
+            running_results[-1] = m((self.static_eval(g)*(-1)**game.turn, move)
+                                    for (g, move) in node_stack[-1])
+            node_stack[-1] = []
 
-        m = max if parity else min
-        if depth == 1:
-            rtn = None
-            val = -10**6 if parity else 10**6
-            for move in game.moves():
-                new_game = simulate(move)
-                self.instances[0] += 1
-                if new_game.to_FEN() in self.cache:
-                    temp_val = self.cache[new_game.to_FEN()]
-                else:
-                    temp_val = self.static_eval(new_game) * (-1)**(game.turn % 2)
-                    self.cache[new_game.to_FEN()] = temp_val
-                rtn, val = m((rtn, val), (move, temp_val), key=lambda x: x[1])
-            self.cache[game.to_FEN()] = val
-            return rtn, val
-        else:
-            rtn, val = m(((move, self.minmax(simulate(move), 1 - parity, depth - 1))
-                          for move in game.moves()), key=lambda x: x[1][1])
-            #self.cache[game.to_FEN()] = val
-            return rtn, val[1]
+            # update(running_results)
+            i = self.depth - 1
+            while i > 0 and not node_stack[i + 1]:
+                m = max if i % 2 == 1 else min
+                running_results[i - 1] = m(running_results[i - 1], running_results[i])
+                running_results[i] = (-10**6 * (-1)**i, None)
+                del node_stack[i + 1]
+                i -= 1
+
+            if not node_stack[1]:
+                break
+        return running_results[0][1]
+
 
     def static_eval(self, game):
         return self.eval_player(game, WHITE) - self.eval_player(game, BLACK)
 
     def eval_player(self, game, colour):
+        if game.winner == WHITE:
+            return 1000
+        elif game.winner == BLACK:
+            return -1000
         rtn = 0
         for piece in game.pieces:
             if colour == (ord(piece) > 97):
@@ -98,7 +99,7 @@ class MinMaxAgent():
                 elif piece in ['k', 'K']:
                     rtn += 1000 * len(game.pieces[piece])
                 for x, y, c in game.pieces[piece]:
-                    rtn += 0.15 * len(game.piece_objs(piece).moves(game, x, y, c))
+                    rtn += 0.25 * len(game.piece_objs(piece).moves(game, x, y, c))
         return rtn
 
 class Game():

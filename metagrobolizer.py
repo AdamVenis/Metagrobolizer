@@ -3,7 +3,6 @@
 #   remove recursion
 #   modify board instance instead of create new instance (test this)
 #   use timer module to evaluate for a certain time period
-#   remove state from piece objects so they don't need to be instantiated
 ##
 
 import cmd
@@ -25,36 +24,30 @@ QUEEN = 6
 KING = 7
 
 class HumanAgent():
-    def __init__(self, game, *args):
-        self.game = game
+    def __init__(self, *args):
+        pass
 
-    def move(self):
-        moves = self.game.moves()
+    def move(self, game):
+        moves = game.moves()
         while True:
-            input = raw_input('hey buddy ').lower()
-            rtn = Move.from_string(input, self.game)
+            input = raw_input('hey buddy tell me your move: ').lower()
+            rtn = Move.from_string(input, game)
             if rtn in moves:
                 return rtn
             print('BAD INPUT, TRY AGAIN')
 
 class RandomAgent():
-    def __init__(self, game):
-        self.game = game
-
-    def move(self):
-        moves = self.game.moves()
-        return random.choice(moves)
+    def move(self, game):
+        return random.choice(game.moves())
 
 class MinMaxAgent():
-    def __init__(self, game, colour, depth):
-        self.game = game
-        self.colour = colour
+    def __init__(self, depth):
         self.depth = depth
 
-    def move(self):
+    def move(self, game):
         self.cache = {}
         self.instances = defaultdict(int)
-        rtn, val = self.minmax(self.game, parity=1, depth=self.depth)
+        rtn, val = self.minmax(game, parity=1, depth=self.depth)
         print('instances: %s, cache_size: %s' % (self.instances, len(self.cache)))
         #print('%s, %.2f' % (str(rtn), val))
         return rtn
@@ -74,7 +67,7 @@ class MinMaxAgent():
                 if new_game.to_FEN() in self.cache:
                     temp_val = self.cache[new_game.to_FEN()]
                 else:
-                    temp_val = self.static_eval(new_game) * (-1)**self.colour
+                    temp_val = self.static_eval(new_game) * (-1)**(game.turn % 2)
                     self.cache[new_game.to_FEN()] = temp_val
                 rtn, val = m((rtn, val), (move, temp_val), key=lambda x: x[1])
             self.cache[game.to_FEN()] = val
@@ -82,7 +75,7 @@ class MinMaxAgent():
         else:
             rtn, val = m(((move, self.minmax(simulate(move), 1 - parity, depth - 1))
                           for move in game.moves()), key=lambda x: x[1][1])
-            self.cache[game.to_FEN()] = val
+            #self.cache[game.to_FEN()] = val
             return rtn, val[1]
 
     def static_eval(self, game):
@@ -105,7 +98,7 @@ class MinMaxAgent():
                 elif piece in ['k', 'K']:
                     rtn += 1000 * len(game.pieces[piece])
                 for x, y, c in game.pieces[piece]:
-                    rtn += 0.25 * len(game.piece_objs(piece).moves(game, x, y, c))
+                    rtn += 0.15 * len(game.piece_objs(piece).moves(game, x, y, c))
         return rtn
 
 class Game():
@@ -196,7 +189,8 @@ class Game():
         return '%s %s %s %s %d %d' % (FEN_board,
                                       'b' if self.turn % 2 else 'w',
                                       self.castling,
-                                      self.en_passant or '-',
+                                      ('%s%d' % (chr(self.en_passant[0] + 97), self.en_passant[1] + 1) if
+                                        self.en_passant else '-'),
                                       self.halfmove_clock,
                                       self.turn // 2 + 1)
 
@@ -357,8 +351,7 @@ class Move():
         self.game.turn += 1
 
         if self.source_piece.lower() == 'p' and abs(self.new_y - self.old_y) == 2:
-            direction = 1 if self.game.turn % 2 == 0 else -1
-            self.game.en_passant = (self.old_x, self.old_y + direction)
+            self.game.en_passant = (self.old_x, (self.old_y + self.new_y) // 2)
         else:
             self.game.en_passant = None
 
@@ -398,8 +391,8 @@ def simulate(move):
 
 def play(pgn_output_file=None):
     game = Game()
-    agent1 = MinMaxAgent(game, WHITE, 3)
-    agent2 = MinMaxAgent(game, BLACK, 3)
+    agent1 = MinMaxAgent(3)
+    agent2 = MinMaxAgent(3)
     start = time.time()
     if pgn_output_file:
         out = open(pgn_output_file, 'w+')
@@ -426,7 +419,7 @@ def play(pgn_output_file=None):
         print(game)
         print(game.to_FEN())
         print('Time: %s, Eval: %.2f' % (time.time()-start, agent.static_eval(game)))
-        move = agent.move()
+        move = agent.move(game)
 
         if pgn_output_file:
             if game.turn % 2 == 0:
@@ -454,16 +447,14 @@ class Shell(cmd.Cmd):
 
     def do_position(self, args):
         moves = args.split()[2:]
-        game = Game()
-        human_agent = HumanAgent(game)
+        self.game = Game()
+        human_agent = HumanAgent()
         for move in moves:
-            Move.from_string(move, game).execute()
-        self.game = game
+            Move.from_string(move, self.game).execute()
 
     def do_go(self, args):
-        game = self.game
-        engine_agent = MinMaxAgent(game, BLACK if game.turn % 2 else WHITE, 3)
-        print('bestmove %s' % engine_agent.move().to_string())
+        engine_agent = MinMaxAgent(3)
+        print('bestmove %s' % engine_agent.move(self.game).to_string())
 
     def do_quit(self, args):
         sys.exit()

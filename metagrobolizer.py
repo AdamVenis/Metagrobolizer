@@ -46,28 +46,34 @@ class MinMaxAgent():
         self.depth = depth
 
     def move(self, game):
-        running_results = [(-10**6 * (-1)**i, None) for i in range(self.depth + 1)]
-        nodes = [[(simulate(move), move) for move in game.moves()]]
-        while nodes[0]:
+        results = [(-10**6 * (-1)**i, None) for i in range(self.depth + 1)]
+        nodes = [[(simulate(move), [move]) for move in game.moves()]]
+        while nodes:
             # expand(nodes)
             while len(nodes) < self.depth:
-                nodes.append([(simulate(move), nodes[-1][-1][1])
-                    for move in nodes[-1][-1][0].moves()])
-                nodes[-2].pop()
+                g, m = nodes[-1].pop()
+                nodes.append([(simulate(move), m + [move]) for move in g.moves()])
 
-            # evaluate deepest node
-            g, move = nodes[-1].pop()
-            running_results[-1] = (self.static_eval(g)*(-1)**game.turn, move)
+            flag = True
+            while flag:
+                # evaluate deepest node
+                g, m = nodes[-1].pop()
+                results[-1] = (self.static_eval(g)*(-1)**game.turn, m)
 
-            # update running results
-            for i in range(self.depth - 1, -1, -1):
-                m = max if i % 2 == 0 else min
-                running_results[i] = m(running_results[i], running_results[i + 1])
-                running_results[i + 1] = (10**6 * (-1)**i, None)
-                if nodes[i]:
-                    break
-                del nodes[i]
-        return running_results[0][1]
+                # update running results
+                for i in range(self.depth - 1, -1, -1):
+                    minmax = max if i % 2 == 0 else min
+                    results[i] = minmax(results[i], results[i + 1])
+                    if i > 0 and results[i] == minmax(results[i], results[i-1]):
+                        for j in range(i, len(nodes)):
+                            nodes[j] = []
+                    results[i + 1] = (10**6 * (-1)**i, None)
+                    if nodes[i]:
+                        break
+                    flag = False
+                    del nodes[i]
+        print('expected sequence: %s' % [str(i) for i in results[0][1]])
+        return results[0][1][0]
 
     def static_eval(self, game):
         if game.winner == WHITE:
@@ -94,110 +100,8 @@ class MinMaxAgent():
                 elif piece in ['k', 'K']:
                     rtn += 1000 * len(game.pieces[piece])
                 for x, y, c in game.pieces[piece]:
-                    rtn += 0.1 * len(game.piece_objs(piece)(game, x, y, c))
+                    rtn += 0.1 * len(Game.piece_objs[piece](game, x, y, c))
         return rtn
-
-class Game():
-    def __init__(self):
-        self.board = [[FREE] * 8 for _ in range(8)]
-        self.pieces = defaultdict(list)
-        self.turn = 0
-        self.winner = -1
-        self.castling = 'KQkq' # FEN notation for each castle possibility
-        self.castling_trail = [] # for avoiding castling through check
-        self.en_passant = None # square that can currently be en passant'd into
-        self.halfmove_clock = 0
-
-        for i in range(8):
-            self.add('P', i, 1)
-            self.add('p', i, 6)
-
-        self.add('R', 0, 0)
-        self.add('N', 1, 0)
-        self.add('B', 2, 0)
-        self.add('Q', 3, 0)
-        self.add('K', 4, 0)
-        self.add('B', 5, 0)
-        self.add('N', 6, 0)
-        self.add('R', 7, 0)
-
-        self.add('r', 0, 7)
-        self.add('n', 1, 7)
-        self.add('b', 2, 7)
-        self.add('q', 3, 7)
-        self.add('k', 4, 7)
-        self.add('b', 5, 7)
-        self.add('n', 6, 7)
-        self.add('r', 7, 7)
-
-    def add(self, piece, x, y):
-        self.board[x][y] = piece
-        self.pieces[piece].append((x, y, ord(piece) > 97))
-
-    def piece_objs(self, piece):
-        piece = piece.lower()
-        if piece == 'p':
-            return pawn
-        elif piece == 'n':
-            return knight
-        elif piece == 'b':
-            return bishop
-        elif piece == 'r':
-            return rook
-        elif piece == 'q':
-            return queen
-        elif piece == 'k':
-            return king
-
-    def moves(self):
-        rtn = []
-        for piece in self.pieces:
-            for x, y, c in self.pieces[piece]:
-                if c == self.turn % 2:
-                    rtn.extend(self.piece_objs(piece)(self, x, y, c))
-        return rtn
-
-    def square(self, x, y):
-        if not (0 <= x < 8 and 0 <= y < 8):
-            return None
-        elif self.board[x][y] == FREE:
-            return FREE
-        else:
-            return ord(self.board[x][y]) > 97
-
-    def to_FEN(self):
-        FEN_board = []
-        space_counter = 0
-        for row in zip(*self.board)[::-1]:
-            FEN_board.append('')
-            for col in row:
-                if col == FREE:
-                    space_counter += 1
-                else:
-                    if space_counter > 0:
-                        FEN_board[-1] += str(space_counter)
-                        space_counter = 0
-                    FEN_board[-1] += col
-            if space_counter > 0:
-                FEN_board[-1] += str(space_counter)
-                space_counter = 0
-        FEN_board = '/'.join(FEN_board)
-        return '%s %s %s %s %d %d' % (FEN_board,
-                                      'b' if self.turn % 2 else 'w',
-                                      self.castling,
-                                      ('%s%d' % (chr(self.en_passant[0] + 97), self.en_passant[1] + 1) if
-                                        self.en_passant else '-'),
-                                      self.halfmove_clock,
-                                      self.turn // 2 + 1)
-
-    def __str__(self):
-        rtn = ''
-        for row in zip(*self.board)[::-1]:
-            rtn += ' | '.join('.' if x == -1 else x for x in row) + '\n'
-        return rtn
-
-    def __eq__(self, other):
-        return str(self) == str(other)
 
 def pawn(game, x, y, colour):
     rtn = []
@@ -278,6 +182,101 @@ def king(game, x, y, colour):
         if game.square(new_x, new_y) in [FREE, 1 - colour]:
             rtn.append(Move(game, x, y, new_x, new_y))
     return rtn # cannot move into check? and through check. and castle.
+
+class Game():
+    piece_objs = {}
+    piece_objs['p'] = piece_objs['P'] = pawn
+    piece_objs['n'] = piece_objs['N'] = knight
+    piece_objs['b'] = piece_objs['B'] = bishop
+    piece_objs['r'] = piece_objs['R'] = rook
+    piece_objs['q'] = piece_objs['Q'] = queen
+    piece_objs['k'] = piece_objs['K'] = king
+
+    def __init__(self):
+        self.board = [[FREE] * 8 for _ in range(8)]
+        self.pieces = defaultdict(list)
+        self.turn = 0
+        self.winner = -1
+        self.castling = 'KQkq' # FEN notation for each castle possibility
+        self.castling_trail = [] # for avoiding castling through check
+        self.en_passant = None # square that can currently be en passant'd into
+        self.halfmove_clock = 0
+
+        for i in range(8):
+            self.add('P', i, 1)
+            self.add('p', i, 6)
+
+        self.add('R', 0, 0)
+        self.add('N', 1, 0)
+        self.add('B', 2, 0)
+        self.add('Q', 3, 0)
+        self.add('K', 4, 0)
+        self.add('B', 5, 0)
+        self.add('N', 6, 0)
+        self.add('R', 7, 0)
+
+        self.add('r', 0, 7)
+        self.add('n', 1, 7)
+        self.add('b', 2, 7)
+        self.add('q', 3, 7)
+        self.add('k', 4, 7)
+        self.add('b', 5, 7)
+        self.add('n', 6, 7)
+        self.add('r', 7, 7)
+
+    def add(self, piece, x, y):
+        self.board[x][y] = piece
+        self.pieces[piece].append((x, y, ord(piece) > 97))
+
+    def moves(self):
+        rtn = []
+        for piece in self.pieces:
+            for x, y, c in self.pieces[piece]:
+                if c == self.turn % 2:
+                    rtn.extend(Game.piece_objs[piece](self, x, y, c))
+        return rtn
+
+    def square(self, x, y):
+        if not (0 <= x < 8 and 0 <= y < 8):
+            return None
+        elif self.board[x][y] == FREE:
+            return FREE
+        else:
+            return ord(self.board[x][y]) > 97
+
+    def to_FEN(self):
+        FEN_board = []
+        space_counter = 0
+        for row in zip(*self.board)[::-1]:
+            FEN_board.append('')
+            for col in row:
+                if col == FREE:
+                    space_counter += 1
+                else:
+                    if space_counter > 0:
+                        FEN_board[-1] += str(space_counter)
+                        space_counter = 0
+                    FEN_board[-1] += col
+            if space_counter > 0:
+                FEN_board[-1] += str(space_counter)
+                space_counter = 0
+        FEN_board = '/'.join(FEN_board)
+        return '%s %s %s %s %d %d' % (FEN_board,
+                                      'b' if self.turn % 2 else 'w',
+                                      self.castling,
+                                      ('%s%d' % (chr(self.en_passant[0] + 97), self.en_passant[1] + 1) if
+                                        self.en_passant else '-'),
+                                      self.halfmove_clock,
+                                      self.turn // 2 + 1)
+
+    def __str__(self):
+        rtn = ''
+        for row in zip(*self.board)[::-1]:
+            rtn += ' | '.join('.' if x == -1 else x for x in row) + '\n'
+        return rtn
+
+    def __eq__(self, other):
+        return str(self) == str(other)
 
 class Move():
     def __init__(self, game, old_x, old_y, new_x, new_y):

@@ -48,20 +48,29 @@ class MinMaxAgent():
     def move(self, game):
         results = [(-10**6 * (-1)**i, None) for i in range(self.depth + 1)]
         nodes = [[(simulate(move), [move]) for move in game.moves()]]
+        eval_cache = {}
+        ehits = 0
         while nodes:
             # expand(nodes)
             while len(nodes) < self.depth:
+                while not nodes[-1]:
+                    del nodes[-1]
                 g, m = nodes[-1].pop()
                 nodes.append([(simulate(move), m + [move]) for move in g.moves()])
-
             flag = True
             while flag:
                 # evaluate deepest node
                 g, m = nodes[-1].pop()
-                results[-1] = (self.static_eval(g)*(-1)**game.turn, m)
+                fen = g.to_FEN()
+                if fen not in eval_cache:
+                    eval_cache[fen] = (self.static_eval(g)*(-1)**game.turn, m)
+                else:
+                    ehits += 1
+                results[-1] = eval_cache[fen]
 
                 # update running results
-                for i in range(self.depth - 1, -1, -1):
+                i = self.depth - 1
+                while i >= 0:
                     minmax = max if i % 2 == 0 else min
                     results[i] = minmax(results[i], results[i + 1])
                     if i > 0 and results[i] == minmax(results[i], results[i-1]):
@@ -69,9 +78,11 @@ class MinMaxAgent():
                             nodes[j] = []
                     results[i + 1] = (10**6 * (-1)**i, None)
                     if nodes[i]:
-                        break
+                        break   
                     flag = False
                     del nodes[i]
+                    i -= 1
+        print('eval cache size: %s with %d hits' % (len(eval_cache), ehits))
         print('expected sequence: %s' % [str(i) for i in results[0][1]])
         return results[0][1][0]
 
@@ -192,41 +203,51 @@ class Game():
     piece_objs['q'] = piece_objs['Q'] = queen
     piece_objs['k'] = piece_objs['K'] = king
 
-    def __init__(self):
-        self.board = [[FREE] * 8 for _ in range(8)]
-        self.pieces = defaultdict(list)
-        self.turn = 0
-        self.winner = -1
-        self.castling = 'KQkq' # FEN notation for each castle possibility
-        self.castling_trail = [] # for avoiding castling through check
-        self.en_passant = None # square that can currently be en passant'd into
-        self.halfmove_clock = 0
+    def __init__(self, other=None):
+        if other:
+            self.board = [[piece for piece in row] for row in other.board]
+            self.pieces = {k: [p for p in v] for k, v in other.pieces.iteritems()}
+            self.turn = other.turn
+            self.winner = other.winner
+            self.castling = other.castling
+            self.castling_trail = other.castling_trail
+            self.en_passant = other.en_passant
+            self.halfmove_clock = other.halfmove_clock
+        else:
+            self.board = [[FREE] * 8 for _ in range(8)]
+            self.pieces = {}
+            self.turn = 0
+            self.winner = -1
+            self.castling = 'KQkq' # FEN notation for each castle possibility
+            self.castling_trail = [] # for avoiding castling through check
+            self.en_passant = None # square that can currently be en passant'd into
+            self.halfmove_clock = 0
 
-        for i in range(8):
-            self.add('P', i, 1)
-            self.add('p', i, 6)
+            for i in range(8):
+                self.add('P', i, 1)
+                self.add('p', i, 6)
 
-        self.add('R', 0, 0)
-        self.add('N', 1, 0)
-        self.add('B', 2, 0)
-        self.add('Q', 3, 0)
-        self.add('K', 4, 0)
-        self.add('B', 5, 0)
-        self.add('N', 6, 0)
-        self.add('R', 7, 0)
+            self.add('R', 0, 0)
+            self.add('N', 1, 0)
+            self.add('B', 2, 0)
+            self.add('Q', 3, 0)
+            self.add('K', 4, 0)
+            self.add('B', 5, 0)
+            self.add('N', 6, 0)
+            self.add('R', 7, 0)
 
-        self.add('r', 0, 7)
-        self.add('n', 1, 7)
-        self.add('b', 2, 7)
-        self.add('q', 3, 7)
-        self.add('k', 4, 7)
-        self.add('b', 5, 7)
-        self.add('n', 6, 7)
-        self.add('r', 7, 7)
+            self.add('r', 0, 7)
+            self.add('n', 1, 7)
+            self.add('b', 2, 7)
+            self.add('q', 3, 7)
+            self.add('k', 4, 7)
+            self.add('b', 5, 7)
+            self.add('n', 6, 7)
+            self.add('r', 7, 7)
 
     def add(self, piece, x, y):
         self.board[x][y] = piece
-        self.pieces[piece].append((x, y, ord(piece) > 97))
+        self.pieces.setdefault(piece, []).append((x, y, ord(piece) > 97))
 
     def moves(self):
         rtn = []
@@ -300,12 +321,12 @@ class Move():
         self.game.pieces[self.source_piece].remove((self.old_x, self.old_y, ord(self.source_piece) > 97))
         self.game.pieces[self.source_piece].append((self.new_x, self.new_y, ord(self.source_piece) > 97))
 
-        self.game.turn += 1
-
         if self.source_piece.lower() == 'p' and abs(self.new_y - self.old_y) == 2:
             self.game.en_passant = (self.old_x, (self.old_y + self.new_y) // 2)
         else:
             self.game.en_passant = None
+
+        self.game.turn += 1
 
     @staticmethod
     def from_string(input, game):
@@ -341,14 +362,15 @@ class Move():
         return 'Move: %s to %s%d' % (self.source_piece, chr(self.new_x + 65), self.new_y + 1)
 
 def simulate(move):
-    new_move = copy.deepcopy(move)
+    new_move = copy.copy(move)
+    new_move.game = Game(move.game)
     new_move.execute()
     return new_move.game
 
 def play(pgn_output_file=None):
     game = Game()
-    agent1 = MinMaxAgent(3)
-    agent2 = MinMaxAgent(3)
+    agent1 = MinMaxAgent(4)
+    agent2 = MinMaxAgent(4)
     start = time.time()
     if pgn_output_file:
         out = open(pgn_output_file, 'w+')
@@ -418,45 +440,3 @@ if __name__ == '__main__':
     #play()
     play(pgn_output_file='replays/replay004.pgn') # terminal interface
     #Shell().cmdloop() # uci interface
-
-def test(): # sample game
-    g = Game()
-    Move(g, 4, 1, 4, 2).execute()
-    Move(g, 3, 6, 3, 4).execute()
-    Move(g, 3, 0, 7, 4).execute()
-    Move(g, 3, 7, 3, 5).execute()
-    Move(g, 5, 0, 1, 4).execute()
-    Move(g, 2, 6, 2, 5).execute()
-    Move(g, 1, 4, 4, 1).execute()
-    Move(g, 6, 7, 5, 5).execute()
-    Move(g, 7, 4, 5, 2).execute()
-    Move(g, 2, 7, 6, 3).execute()
-    Move(g, 5, 2, 6, 2).execute()
-    Move(g, 6, 3, 4, 1).execute()
-    Move(g, 6, 0, 4, 1).execute()
-    Move(g, 4, 6, 4, 5).execute()
-    Move(g, 6, 2, 5, 2).execute()
-    Move(g, 3, 5, 4, 4).execute()
-    Move(g, 3, 1, 3, 3).execute()
-    Move(g, 4, 4, 6, 4).execute()
-    Move(g, 4, 2, 4, 3).execute()
-    Move(g, 3, 4, 4, 3).execute()
-    Move(g, 2, 0, 6, 4).execute()
-    Move(g, 4, 3, 5, 2).execute()
-    Move(g, 4, 1, 5, 3).execute()
-    Move(g, 5, 5, 4, 3).execute()
-    Move(g, 7, 1, 7, 3).execute()
-    Move(g, 5, 2, 6, 1).execute()
-    Move(g, 7, 0, 7, 2).execute()
-    Move(g, 5, 7, 1, 3).execute()
-    Move(g, 1, 0, 3, 1).execute()
-    Move(g, 4, 3, 6, 4).execute()
-    Move(g, 7, 3, 6, 4).execute()
-    Move(g, 4, 5, 4, 4).execute()
-    Move(g, 3, 3, 4, 4).execute()
-    Move(g, 1, 7, 3, 6).execute()
-    Move(g, 0, 1, 0, 2).execute()
-    Move(g, 1, 3, 0, 4).execute()
-    Move(g, 1, 1, 1, 3).execute()
-    Move(g, 0, 4, 2, 6).execute()
-    return g

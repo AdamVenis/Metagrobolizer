@@ -9,3 +9,4 @@ Load the executable as an engine into your favourite UCI-compatible chess GUI, s
 Changelog:
 2016-05-18: recursive to iterative minimax: 44s to 37s for 3 moves at depth 3.
 2016-05-19: alpha beta pruning: 37s to 19s for 3 moves at depth 3.
+2016-05-24: replace deepcopy with custom copy constructor: 19s to 5s for 3 moves depth 3, 64s for 3 moves at depth 4.

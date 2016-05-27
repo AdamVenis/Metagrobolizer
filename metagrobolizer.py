@@ -126,7 +126,7 @@ def pawn(game, x, y, colour):
     rtn = []
     direction = 1 if colour == WHITE else -1
     if game.square(x, y + direction) == FREE:
-        if y + direction % 7 == 0: # second last rank
+        if (y + direction) % 7 == 0: # second last rank
             for i in range(4):
                 rtn.append(Move(game, x, y, x, i)) # garbage to interpret as promotion
         else:
@@ -139,7 +139,7 @@ def pawn(game, x, y, colour):
         if new_square == game.en_passant:
             rtn.append(Move(game, x, y, *new_square))
         elif new_square in game.castling_trail or game.square(*new_square) == 1 - colour:
-            if y + direction % 7 == 0:
+            if (y + direction) % 7 == 0:
                 for i in range(4):
                     rtn.append(Move(game, x, y, x + capture_delta, i))
             else:
@@ -352,7 +352,7 @@ class Move():
 
         # tweak variables for promotion (decode encoded move)
         if (self.source_piece in PAWNS and
-            self.old_y + (1 - 2 * colour) % 7 == 0): # second last rank
+            (self.old_y + (1 - 2 * colour)) % 7 == 0): # second last rank
             promotion_piece = ['NBRQ', 'nbrq'][colour][self.new_y]
             self.new_y = (self.old_y // 4) * 7
             self.target_piece = self.game.board[self.new_x][self.new_y]
@@ -547,5 +547,5 @@ class Shell(cmd.Cmd):
 
 if __name__ == '__main__':
     #play()
-    play(pgn_output_file='replays/replay006.pgn') # terminal interface
+    play(pgn_output_file='replays/replay007.pgn') # terminal interface
     #Shell().cmdloop() # uci interface

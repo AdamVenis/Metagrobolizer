@@ -1,9 +1,10 @@
 ## TODOS:
-#   alpha beta pruning
-#   remove recursion
 #   modify board instance instead of create new instance (test this)
+#       - deemed unnecessary for now since static_eval uses 80% of the time
 #   use timer module to evaluate for a certain time period
 #   make the agent stop playing with its food (most direct checkmate)
+#   better static eval heuristics (i.e. threats)
+#   finish rules (castling, promotion, draw)
 ##
 
 import cmd
@@ -23,6 +24,13 @@ BISHOP = 4
 ROOK = 5
 QUEEN = 6
 KING = 7
+PAWNS = ['p', 'P']
+KNIGHTS = ['n', 'N']
+BISHOPS = ['b', 'B']
+ROOKS = ['r', 'R']
+QUEENS = ['q', 'Q']
+KINGS = ['k', 'K']
+CORNERS = [(0, 0), (0, 7), (7, 0), (7, 7)]
 
 class HumanAgent():
     def __init__(self, *args):
@@ -63,10 +71,10 @@ class MinMaxAgent():
                 g, m = nodes[-1].pop()
                 fen = g.to_FEN()
                 if fen not in eval_cache:
-                    eval_cache[fen] = (self.static_eval(g)*(-1)**game.turn, m)
+                    eval_cache[fen] = self.static_eval(g)*(-1)**game.turn
                 else:
                     ehits += 1
-                results[-1] = eval_cache[fen]
+                results[-1] = (eval_cache[fen], m)
 
                 # update running results
                 i = self.depth - 1
@@ -98,17 +106,17 @@ class MinMaxAgent():
         rtn = 0
         for piece in game.pieces:
             if colour == (ord(piece) > 97):
-                if piece in ['p', 'P']:
+                if piece in PAWNS:
                     rtn += 1 * len(game.pieces[piece])
-                elif piece in ['n', 'N']:
+                elif piece in KNIGHTS:
                     rtn += 3 * len(game.pieces[piece])
-                elif piece in ['b', 'B']:
+                elif piece in BISHOPS:
                     rtn += 3 * len(game.pieces[piece])
-                elif piece in ['r', 'R']:
+                elif piece in ROOKS:
                     rtn += 5 * len(game.pieces[piece])
-                elif piece in ['q', 'Q']:
+                elif piece in QUEENS:
                     rtn += 9 * len(game.pieces[piece])
-                elif piece in ['k', 'K']:
+                elif piece in KINGS:
                     rtn += 1000 * len(game.pieces[piece])
                 for x, y, c in game.pieces[piece]:
                     rtn += 0.1 * len(Game.piece_objs[piece](game, x, y, c))
@@ -118,18 +126,25 @@ def pawn(game, x, y, colour):
     rtn = []
     direction = 1 if colour == WHITE else -1
     if game.square(x, y + direction) == FREE:
-        rtn.append(Move(game, x, y, x, y + direction))
-        if (y + direction*6 in range(len(game.board)) and
-            game.square(x, y + 2 * direction) == FREE):
-            rtn.append(Move(game, x, y, x, y + 2 * direction))
-        elif y % 8 == (-1)**direction: # second last rank
-            pass # some promotion stuff
+        if y + direction % 7 == 0: # second last rank
+            for i in range(4):
+                rtn.append(Move(game, x, y, x, i)) # garbage to interpret as promotion
+        else:
+            rtn.append(Move(game, x, y, x, y + direction))
+            if (((y - direction) % 7 == 0) and
+                game.square(x, y + 2 * direction) == FREE):
+                rtn.append(Move(game, x, y, x, y + 2 * direction))
     for capture_delta in [-1, 1]:
         new_square = x + capture_delta, y + direction
-        if game.square(*new_square) == 1 - colour or new_square == game.en_passant:
+        if new_square == game.en_passant:
             rtn.append(Move(game, x, y, *new_square))
-
-    return rtn # still needs promotions
+        elif new_square in game.castling_trail or game.square(*new_square) == 1 - colour:
+            if y + direction % 7 == 0:
+                for i in range(4):
+                    rtn.append(Move(game, x, y, x + capture_delta, i))
+            else:
+                rtn.append(Move(game, x, y, *new_square))
+    return rtn
 
 
 def knight(game, x, y, colour):
@@ -192,6 +207,15 @@ def king(game, x, y, colour):
         new_y = y + delta[1]
         if game.square(new_x, new_y) in [FREE, 1 - colour]:
             rtn.append(Move(game, x, y, new_x, new_y))
+    if (chr(75 + 32 * colour) in game.castling and
+        game.square(x + 1, y) == FREE and
+        game.square(x + 2, y) == FREE):
+        rtn.append(Move(game, x, y, x + 2, y))
+    if (chr(81 + 32 * colour) in game.castling and
+        game.square(x - 1, y) == FREE and
+        game.square(x - 2, y) == FREE and
+        game.square(x - 3, y) == FREE):
+        rtn.append(Move(game, x, y, x - 2, y))
     return rtn # cannot move into check? and through check. and castle.
 
 class Game():
@@ -226,24 +250,8 @@ class Game():
             for i in range(8):
                 self.add('P', i, 1)
                 self.add('p', i, 6)
-
-            self.add('R', 0, 0)
-            self.add('N', 1, 0)
-            self.add('B', 2, 0)
-            self.add('Q', 3, 0)
-            self.add('K', 4, 0)
-            self.add('B', 5, 0)
-            self.add('N', 6, 0)
-            self.add('R', 7, 0)
-
-            self.add('r', 0, 7)
-            self.add('n', 1, 7)
-            self.add('b', 2, 7)
-            self.add('q', 3, 7)
-            self.add('k', 4, 7)
-            self.add('b', 5, 7)
-            self.add('n', 6, 7)
-            self.add('r', 7, 7)
+                self.add('RNBQKBNR'[i], i, 0)
+                self.add('rnbqkbnr'[i], i, 7)
 
     def add(self, piece, x, y):
         self.board[x][y] = piece
@@ -265,6 +273,7 @@ class Game():
         else:
             return ord(self.board[x][y]) > 97
 
+
     def to_FEN(self):
         FEN_board = []
         space_counter = 0
@@ -285,10 +294,38 @@ class Game():
         return '%s %s %s %s %d %d' % (FEN_board,
                                       'b' if self.turn % 2 else 'w',
                                       self.castling,
-                                      ('%s%d' % (chr(self.en_passant[0] + 97), self.en_passant[1] + 1) if
-                                        self.en_passant else '-'),
+                                      sq2str(*self.en_passant) if self.en_passant else '-',
                                       self.halfmove_clock,
                                       self.turn // 2 + 1)
+
+    @staticmethod
+    def from_SAN(SAN_str):
+        # utility method for debugging (can be used to load a game from a PGN file)
+        g = Game()
+        turns = SAN_str.split('.')[1:]
+        for move in [m for turn in turns for m in turn.split()[:2]]:
+            for m in g.moves():
+                new_square = sq2str(m.new_x, m.new_y)
+                if (move == 'O-O' and g.board[m.old_x][m.old_y] in KINGS
+                    and m.old_x + 2 == m.new_x):
+                    m.execute()
+                elif (move == 'O-O-O' and g.board[m.old_x][m.old_y] in KINGS
+                    and m.old_x == m.new_x + 3):
+                    m.execute()
+                elif len(move) == 2:
+                    if (new_square == move[:2] and g.board[m.old_x][m.old_y] in PAWNS):
+                        m.execute() # like e4
+                elif len(move) == 3:
+                    if (new_square == move[1:] and g.board[m.old_x][m.old_y].upper() == move[0]):
+                        m.execute() # like Bc4
+                elif len(move) == 4 and move[1] == 'x':
+                    if new_square == move[2:]:
+                        if chr(m.old_x + 97) == move[0]:
+                            m.execute() # like axb4
+                        elif g.board[m.old_x][m.old_y].upper() == move[0]:
+                            m.execute() # like Rxd5
+        return g # incomplete, needs piece disambiguation and promotions
+
 
     def __str__(self):
         rtn = ''
@@ -310,43 +347,108 @@ class Move():
         self.target_piece = game.board[new_x][new_y]
 
     def execute(self):
-        if self.target_piece in ['k', 'K']:
-            self.game.winner = 1 - (ord(self.target_piece) > 97)
-        if self.target_piece != FREE:
+        colour = ord(self.source_piece) > 97
+        promotion_piece = None
+
+        # tweak variables for promotion (decode encoded move)
+        if (self.source_piece in PAWNS and
+            self.old_y + (1 - 2 * colour) % 7 == 0): # second last rank
+            promotion_piece = ['NBRQ', 'nbrq'][colour][self.new_y]
+            self.new_y = (self.old_y // 4) * 7
+            self.target_piece = self.game.board[self.new_x][self.new_y]
+
+        # remove target_piece and implications
+
+        if (self.source_piece in PAWNS and
+              (self.new_x, self.new_y) == self.game.en_passant):
+            self.target_piece = self.game.board[self.new_x][self.old_y]
+            self.game.pieces[self.target_piece].remove(
+                (self.new_x, self.old_y, ord(self.target_piece) > 97))
+            self.game.board[self.new_x][self.old_y] = FREE
+        elif self.target_piece in self.game.castling_trail:
+            self.game.winner = colour
+        elif self.target_piece != FREE:
             self.game.pieces[self.target_piece].remove(
                 (self.new_x, self.new_y, ord(self.target_piece) > 97))
+            if self.target_piece in KINGS:
+                self.game.winner = 1 - (ord(self.target_piece) > 97)
+            elif (self.target_piece in ROOKS and
+                (self.new_x, self.new_y) in CORNERS):
+                ind = (self.new_y // 7) * 2 + (self.new_x // 7)
+                self.game.castling = self.game.castling.replace('QKqk'[ind], '')
+
+        # move source_piece and implications
+        self.game.en_passant = None
+        self.game.castling_trail = []
 
         self.game.board[self.old_x][self.old_y] = FREE
-        self.game.board[self.new_x][self.new_y] = self.source_piece
-        self.game.pieces[self.source_piece].remove((self.old_x, self.old_y, ord(self.source_piece) > 97))
-        self.game.pieces[self.source_piece].append((self.new_x, self.new_y, ord(self.source_piece) > 97))
+        self.game.pieces[self.source_piece].remove((self.old_x, self.old_y, colour))
 
-        if self.source_piece.lower() == 'p' and abs(self.new_y - self.old_y) == 2:
-            self.game.en_passant = (self.old_x, (self.old_y + self.new_y) // 2)
+        if promotion_piece:
+            self.game.board[self.new_x][self.new_y] = promotion_piece
+            self.game.pieces[promotion_piece].append((self.new_x, self.new_y, colour))
         else:
-            self.game.en_passant = None
+            self.game.board[self.new_x][self.new_y] = self.source_piece
+            self.game.pieces[self.source_piece].append((self.new_x, self.new_y, colour))
+
+        if self.source_piece in PAWNS and abs(self.new_y - self.old_y) == 2:
+            self.game.en_passant = (self.old_x, (self.old_y + self.new_y) // 2)
+        elif self.source_piece in KINGS:
+            if self.new_x == self.old_x - 2:
+                self.game.castling_trail = [(self.old_x - 1, self.old_y), (self.old_x, self.old_y)]
+                rook_piece = self.game.board[0][self.old_y]
+                self.game.board[3][self.old_y] = rook_piece
+                self.game.board[0][self.old_y] = FREE
+                self.game.pieces[rook_piece].remove((0, self.old_y, colour))
+                self.game.pieces[rook_piece].append((3, self.old_y, colour))
+            elif self.new_x == self.old_x + 2:
+                self.game.castling_trail = [(self.old_x, self.old_y), (self.old_x + 1, self.old_y)]
+                rook_piece = self.game.board[7][self.old_y]
+                self.game.board[5][self.old_y] = rook_piece
+                self.game.board[7][self.old_y] = FREE
+                self.game.pieces[rook_piece].remove((7, self.old_y, colour))
+                self.game.pieces[rook_piece].append((5, self.old_y, colour))
+
+            self.game.castling = (self.game.castling
+                                  .replace(chr(75 + 32 * colour), '')
+                                  .replace(chr(81 + 32 * colour), ''))
+        elif self.source_piece in ROOKS and (self.old_x, self.old_y) in CORNERS:
+            ind = (self.old_y // 7) * 2 + (self.old_x // 7)
+            self.game.castling = self.game.castling.replace('QKqk'[ind], '')
 
         self.game.turn += 1
 
     @staticmethod
     def from_string(input, game):
-        old_x = ord(input[0]) - 97
-        old_y = int(input[1]) - 1
-        new_x = ord(input[2]) - 97
-        new_y = int(input[3]) - 1
+        old_x, old_y = str2sq(input[:2])
+        new_x, new_y = str2sq(input[2:])
         return Move(game, old_x, old_y, new_x, new_y)
 
     def to_string(self):
-        return '%s%d%s%d' % (chr(self.old_x + 97), self.old_y + 1,
-                             chr(self.new_x + 97), self.new_y + 1)
+        return sq2str(self.old_x, self.old_y) + sq2str(self.new_x, self.new_y)
 
     def to_SAN(self): # incomplete "short algebraic notation"
-        piece_letter = self.game.board[self.old_x][self.old_y].upper()
+        piece_letter = self.game.board[self.old_x][self.old_y]
         rtn = ''
-        if piece_letter != 'P':
-            rtn += piece_letter
+        if piece_letter in KINGS and abs(self.old_x - self.new_x) > 1:
+            if self.old_x < self.new_x:
+                return 'O-O'
+            else:
+                return 'O-O-O'
+        elif piece_letter not in PAWNS:
+            rtn += piece_letter.upper()
+            for other in self.game.moves():
+                other_piece = self.game.board[other.old_x][other.old_y]
+                if (other_piece == piece_letter and
+                    (other.new_x, other.new_y) == (self.new_x, self.new_y) and
+                    other != self): # needs extra disambiguation
+                    if other.old_x != self.old_x:
+                        rtn += sq2str(self.old_x, self.old_y)[0]
+                    elif other.old_y != self.old_y:
+                        rtn += sq2str(self.old_x, self.old_y)[1]
+                    break
         if self.game.board[self.new_x][self.new_y] != FREE:
-            if piece_letter == 'P':
+            if piece_letter in PAWNS:
                 rtn += chr(self.old_x + 97)
             rtn += 'x'
         rtn += self.to_string()[2:]
@@ -360,6 +462,12 @@ class Move():
 
     def __str__(self):
         return 'Move: %s to %s%d' % (self.source_piece, chr(self.new_x + 65), self.new_y + 1)
+
+def sq2str(x, y):
+    return chr(x + 97) + str(y + 1)
+
+def str2sq(s):
+    return (ord(s[0]) - 97, int(s[1]) - 1)
 
 def simulate(move):
     new_move = copy.copy(move)
@@ -395,6 +503,7 @@ def play(pgn_output_file=None):
         else:
             agent = agent2
         print(game)
+        print(game.to_FEN())
         print('Time: %s, Eval: %.2f' % (time.time()-start, agent.static_eval(game)))
         move = agent.move(game)
 
@@ -438,5 +547,5 @@ class Shell(cmd.Cmd):
 
 if __name__ == '__main__':
     #play()
-    play(pgn_output_file='replays/replay004.pgn') # terminal interface
+    play(pgn_output_file='replays/replay006.pgn') # terminal interface
     #Shell().cmdloop() # uci interface

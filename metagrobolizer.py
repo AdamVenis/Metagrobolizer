@@ -2,10 +2,10 @@
 #   modify board instance instead of create new instance (test this)
 #       - deemed unnecessary for now since static_eval uses 80% of the time
 #   use timer module to evaluate for a certain time period
-#   make the agent stop playing with its food (most direct checkmate)
-#   better static eval heuristics (i.e. threats)
+#   better static eval heuristics
 #   finish rules (draw)
 #   optimize piece ordering in search (for earlier alpha-beta hits)
+#       - a mate in 2 should execute quickly even with depth 10 search
 ##
 
 import cmd
@@ -64,24 +64,28 @@ class MinMaxAgent():
         ehits = 0
         while nodes:
             # expand(nodes)
-            while len(nodes) < self.depth:
-                while not nodes[-1]:
-                    del nodes[-1]
+            while len(nodes) < self.depth and nodes[-1]:
                 g, m = nodes[-1].pop()
                 nodes.append([(simulate(move), m + [move]) for move in g.moves()])
             flag = True
             while flag:
                 # evaluate deepest node
-                g, m = nodes[-1].pop()
-                fen = g.to_FEN()
-                if fen not in eval_cache:
-                    eval_cache[fen] = self.static_eval(g)*(-1)**game.turn
+                if not nodes[-1]: # no moves available
+                    if g.winner == -1:
+                        results[len(nodes)] = (0, m)
+                    else:
+                        results[len(nodes)] = ((1000 - len(nodes))*(-1)**(game.turn + g.winner), m)
                 else:
-                    ehits += 1
-                results[-1] = (eval_cache[fen], m)
+                    g, m = nodes[-1].pop()
+                    fen = g.to_FEN()
+                    if fen not in eval_cache:
+                        eval_cache[fen] = self.static_eval(g)*(-1)**game.turn
+                    else:
+                        ehits += 1
+                    results[-1] = (eval_cache[fen], m)
 
                 # update running results
-                i = self.depth - 1
+                i = len(nodes) - 1
                 while i >= 0:
                     minmax = max if i % 2 == 0 else min
                     results[i] = minmax(results[i], results[i + 1])
@@ -250,6 +254,8 @@ class Game():
         self.pieces.setdefault(piece, []).append((x, y, ord(piece) > 97))
 
     def moves(self):
+        if self.winner != -1:
+            return []
         rtn = []
         for piece in self.pieces:
             for x, y, c in self.pieces[piece]:
@@ -295,30 +301,36 @@ class Game():
         # utility method for debugging (can be used to load a game from a PGN file)
         g = Game()
         turns = SAN_str.split('.')[1:]
-        for move in [m for turn in turns for m in turn.split()[:2]]:
-            for m in g.moves():
-                new_square = sq2str(m.new_x, m.new_y)
-                if (move == 'O-O' and g.board[m.old_x][m.old_y] in KINGS
-                    and m.old_x + 2 == m.new_x):
-                    m.execute()
-                elif (move == 'O-O-O' and g.board[m.old_x][m.old_y] in KINGS
-                    and m.old_x == m.new_x + 3):
-                    m.execute()
-                elif (move[-2] == '=' and move[-1] == m.promotion_piece.upper() and
-                      move[-4:-2] == new_square and move[0] == chr(m.old_x + 97)):
-                    m.execute() # like e8=Q or dxe8=Q
-                elif len(move) == 2:
-                    if (move[:2] == new_square and g.board[m.old_x][m.old_y] in PAWNS):
-                        m.execute() # like e4
-                elif len(move) == 3:
-                    if (move[1:] == new_square and g.board[m.old_x][m.old_y].upper() == move[0]):
-                        m.execute() # like Bc4
-                elif len(move) == 4 and move[1] == 'x':
-                    if move[2:] == new_square:
+        try:
+            for move in [m for turn in turns for m in turn.split()[:2]]:
+                print(str(move))
+                for m in g.moves():
+                    new_square = sq2str(m.new_x, m.new_y)
+                    if (move == 'O-O' and g.board[m.old_x][m.old_y] in KINGS
+                        and m.old_x + 2 == m.new_x):
+                        m.execute()
+                    elif (move == 'O-O-O' and g.board[m.old_x][m.old_y] in KINGS
+                        and m.old_x == m.new_x + 3):
+                        m.execute()
+                    elif (move[-2] == '=' and m.promotion_piece and
+                          move[-1] == m.promotion_piece.upper() and
+                          move[-4:-2] == new_square and move[0] == chr(m.old_x + 97)):
+                        m.execute() # like e8=Q or dxe8=Q
+                    elif len(move) == 2:
+                        if (move[:2] == new_square and g.board[m.old_x][m.old_y] in PAWNS):
+                            m.execute() # like e4
+                    elif move[-2:] == new_square:
+                        first_segment = move.index('x') if 'x' in move else len(move) - 2
                         if move[0] == chr(m.old_x + 97):
                             m.execute() # like axb4
                         elif move[0] == g.board[m.old_x][m.old_y].upper():
-                            m.execute() # like Rxd5
+                            if all(ord(move[i]) in [m.old_x + 97, m.old_y + 49]
+                                   for i in range(1, first_segment)):
+                                m.execute() # like Rb8 or Rab8 or R6b8
+        except Exception as e:
+            print('exception!', e)
+            print(g)
+            pass
         return g # incomplete, needs piece disambiguation and promotions
 
 
@@ -540,5 +552,5 @@ class Shell(cmd.Cmd):
 
 if __name__ == '__main__':
     #play()
-    play(pgn_output_file='replays/replay007.pgn') # terminal interface
+    play(pgn_output_file='replays/replay009.pgn') # terminal interface
     #Shell().cmdloop() # uci interface

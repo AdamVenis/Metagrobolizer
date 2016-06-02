@@ -15,16 +15,11 @@ import sys
 import time
 
 from collections import defaultdict
+from operator import itemgetter
 
 FREE = -1
 WHITE = 0
 BLACK = 1
-PAWN = 2
-KNIGHT = 3
-BISHOP = 4
-ROOK = 5
-QUEEN = 6
-KING = 7
 PAWNS = ['p', 'P']
 KNIGHTS = ['n', 'N']
 BISHOPS = ['b', 'B']
@@ -66,7 +61,7 @@ class MinMaxAgent():
             # expand(nodes)
             while len(nodes) < self.depth and nodes[-1]:
                 g, m = nodes[-1].pop()
-                nodes.append([(simulate(move), m + [move]) for move in g.moves()])
+                nodes.append(self.sort_moves([(simulate(move), m + [move]) for move in g.moves()]))
             flag = True
             while flag:
                 # evaluate deepest node
@@ -88,8 +83,8 @@ class MinMaxAgent():
                 i = len(nodes) - 1
                 while i >= 0:
                     minmax = max if i % 2 == 0 else min
-                    results[i] = minmax(results[i], results[i + 1])
-                    if i > 0 and results[i] == minmax(results[i], results[i-1]):
+                    results[i] = minmax(results[i], results[i + 1], key=itemgetter(0))
+                    if i > 0 and results[i] == minmax(results[i], results[i-1], key=itemgetter(0)):
                         for j in range(i, len(nodes)):
                             nodes[j] = []
                     results[i + 1] = (10**6 * (-1)**i, None)
@@ -102,6 +97,12 @@ class MinMaxAgent():
         print('expected sequence: %s' % [str(i) for i in results[0][1]])
         return results[0][1][0]
 
+    def sort_moves(self, moves):
+        priorities = {-1: -1, 'p': 1, 'P': 1, 'n': 3, 'N': 3,
+                      'b': 3, 'B': 3, 'r': 5, 'R': 5,
+                      'q': 9, 'Q': 9, 'k': 1000, 'K': 1000}
+        return sorted(moves, key=lambda x: priorities[x[1][-1].target_piece])
+
     def static_eval(self, game):
         if game.winner == WHITE:
             return 1000
@@ -112,7 +113,7 @@ class MinMaxAgent():
 
     def eval_player(self, game, colour):
         rtn = 0
-        for piece, posns in game.pieces.iteritems():
+        for piece, posns in game.pieces.items():
             if colour == (ord(piece) > 97):
                 rtn += PIECE_VALS[piece] * len(posns)
                 for x, y, c in posns:
@@ -150,9 +151,9 @@ def pawn(game, x, y, colour):
 def knight(game, x, y, colour):
     rtn = []
     deltas = [(-2, -1), (-2, 1), (-1, -2), (-1, 2), (1, -2), (1, 2), (2, -1), (2, 1)]
-    for delta in deltas:
-        new_x = x + delta[0]
-        new_y = y + delta[1]
+    for dx, dy in deltas:
+        new_x = x + dx
+        new_y = y + dy
         if game.square(new_x, new_y) in [FREE, 1 - colour]:
             rtn.append(Move(game, x, y, new_x, new_y))
     return rtn
@@ -160,13 +161,13 @@ def knight(game, x, y, colour):
 def bishop(game, x, y, colour):
     rtn = []
     deltas = [(-1, -1), (-1, 1), (1, -1), (1, 1)]
-    for delta in deltas:
-        new_x = x + delta[0]
-        new_y = y + delta[1]
+    for dx, dy in deltas:
+        new_x = x + dx
+        new_y = y + dy
         while game.square(new_x, new_y) == FREE:
             rtn.append(Move(game, x, y, new_x, new_y))
-            new_x += delta[0]
-            new_y += delta[1]
+            new_x += dx
+            new_y += dy
         if game.square(new_x, new_y) == 1 - colour:
             rtn.append(Move(game, x, y, new_x, new_y))
     return rtn
@@ -174,13 +175,13 @@ def bishop(game, x, y, colour):
 def rook(game, x, y, colour):
     rtn = []
     deltas = [(-1, 0), (0, -1), (0, 1), (1, 0)]
-    for delta in deltas:
-        new_x = x + delta[0]
-        new_y = y + delta[1]
+    for dx, dy in deltas:
+        new_x = x + dx
+        new_y = y + dy
         while game.square(new_x, new_y) == FREE:
             rtn.append(Move(game, x, y, new_x, new_y))
-            new_x += delta[0]
-            new_y += delta[1]
+            new_x += dx
+            new_y += dy
         if game.square(new_x, new_y) == 1 - colour:
             rtn.append(Move(game, x, y, new_x, new_y))
     return rtn
@@ -188,13 +189,13 @@ def rook(game, x, y, colour):
 def queen(game, x, y, colour):
     rtn = []
     deltas = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]
-    for delta in deltas:
-        new_x = x + delta[0]
-        new_y = y + delta[1]
+    for dx, dy in deltas:
+        new_x = x + dx
+        new_y = y + dy
         while game.square(new_x, new_y) == FREE:
             rtn.append(Move(game, x, y, new_x, new_y))
-            new_x += delta[0]
-            new_y += delta[1]
+            new_x += dx
+            new_y += dy
         if game.square(new_x, new_y) == 1 - colour:
             rtn.append(Move(game, x, y, new_x, new_y))
     return rtn
@@ -202,9 +203,9 @@ def queen(game, x, y, colour):
 def king(game, x, y, colour):
     rtn = []
     deltas = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]
-    for delta in deltas:
-        new_x = x + delta[0]
-        new_y = y + delta[1]
+    for dx, dy in deltas:
+        new_x = x + dx
+        new_y = y + dy
         if game.square(new_x, new_y) in [FREE, 1 - colour]:
             rtn.append(Move(game, x, y, new_x, new_y))
     if (chr(75 + 32 * colour) in game.castling and
@@ -226,7 +227,7 @@ class Game():
     def __init__(self, other=None):
         if other:
             self.board = [[piece for piece in row] for row in other.board]
-            self.pieces = {k: [p for p in v] for k, v in other.pieces.iteritems()}
+            self.pieces = {k: [p for p in v] for k, v in other.pieces.items()}
             self.turn = other.turn
             self.winner = other.winner
             self.castling = other.castling
@@ -275,7 +276,7 @@ class Game():
     def to_FEN(self):
         FEN_board = []
         space_counter = 0
-        for row in zip(*self.board)[::-1]:
+        for row in zip(*reversed(self.board)):
             FEN_board.append('')
             for col in row:
                 if col == FREE:
@@ -336,8 +337,8 @@ class Game():
 
     def __str__(self):
         rtn = ''
-        for row in zip(*self.board)[::-1]:
-            rtn += ' | '.join('.' if x == -1 else x for x in row) + '\n'
+        for row in reversed(list(zip(*self.board))):
+            rtn += ' | '.join('.' if x == FREE else x for x in row) + '\n'
         return rtn
 
     def __eq__(self, other):
@@ -356,23 +357,22 @@ class Move():
 
     def execute(self):
         colour = ord(self.source_piece) > 97
+        target_square = (self.new_x, self.new_y)
 
         # remove target_piece and implications
-        if (self.source_piece in PAWNS and
-              (self.new_x, self.new_y) == self.game.en_passant):
+        if (self.source_piece in PAWNS and target_square == self.game.en_passant):
             self.target_piece = self.game.board[self.new_x][self.old_y]
             self.game.pieces[self.target_piece].remove(
                 (self.new_x, self.old_y, ord(self.target_piece) > 97))
             self.game.board[self.new_x][self.old_y] = FREE
-        elif self.target_piece in self.game.castling_trail:
+        elif target_square in self.game.castling_trail:
             self.game.winner = colour
         elif self.target_piece != FREE:
             self.game.pieces[self.target_piece].remove(
                 (self.new_x, self.new_y, ord(self.target_piece) > 97))
             if self.target_piece in KINGS:
                 self.game.winner = 1 - (ord(self.target_piece) > 97)
-            elif (self.target_piece in ROOKS and
-                (self.new_x, self.new_y) in CORNERS):
+            elif (self.target_piece in ROOKS and target_square in CORNERS):
                 ind = (self.new_y // 7) * 2 + (self.new_x // 7)
                 self.game.castling = self.game.castling.replace('QKqk'[ind], '')
 
@@ -418,10 +418,10 @@ class Move():
         self.game.turn += 1
 
     @staticmethod
-    def from_string(input, game):
-        old_x, old_y = str2sq(input[:2])
-        new_x, new_y = str2sq(input[2:])
-        return Move(game, old_x, old_y, new_x, new_y)
+    def from_string(s, game):
+        old_x, old_y = str2sq(s[:2])
+        new_x, new_y = str2sq(s[2:4])
+        return Move(game, old_x, old_y, new_x, new_y, s[4:])
 
     def to_string(self):
         return sq2str(self.old_x, self.old_y) + sq2str(self.new_x, self.new_y)
@@ -539,18 +539,16 @@ class Shell(cmd.Cmd):
     def do_position(self, args):
         moves = args.split()[2:]
         self.game = Game()
-        human_agent = HumanAgent()
         for move in moves:
             Move.from_string(move, self.game).execute()
 
     def do_go(self, args):
-        engine_agent = MinMaxAgent(3)
+        engine_agent = MinMaxAgent(4)
         print('bestmove %s' % engine_agent.move(self.game).to_string())
 
     def do_quit(self, args):
         sys.exit()
 
 if __name__ == '__main__':
-    #play()
     play(pgn_output_file='replays/replay009.pgn') # terminal interface
     #Shell().cmdloop() # uci interface
